@@ -1,0 +1,23 @@
+name: valencia_pm10
+target_column: value
+datetime_column: date
+frequency: daily
+horizons: [1, 2, 3, 4, 5, 6, 7]
+
+features:
+  endogenous:
+    - value
+  exogenous: []
+
+split:
+  scheme: rolling_origin
+  min_train_size: 365
+  step_size: 1
+  test_size: 7
+
+preprocessing:
+  scale: false
+  impute: false
+
+paths:
+  raw: data/raw/valencia_pm10.csv

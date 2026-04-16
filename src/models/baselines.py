@@ -24,3 +24,12 @@ def seasonal_persistence_forecast(history: np.ndarray, horizon: int, season_leng
     template = hist[-season_length:]
     reps = int(np.ceil(horizon / season_length))
     return np.tile(template, reps)[:horizon]
+
+
+def seasonal_persistence_7_forecast(history: np.ndarray, horizon: int) -> np.ndarray:
+    """Weekly seasonal persistence for daily series."""
+    return seasonal_persistence_forecast(
+        history=history,
+        horizon=horizon,
+        season_length=7,
+    )

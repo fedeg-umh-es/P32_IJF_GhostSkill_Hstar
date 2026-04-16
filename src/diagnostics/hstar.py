@@ -44,20 +44,23 @@ def compute_hstar(skill_by_horizon: Sequence[float], criterion: str = "strict") 
     raise ValueError("criterion must be one of: 'strict', 'relax', 'nonnegative'.")
 
 
-def build_skill_table(metrics_df: pd.DataFrame) -> pd.DataFrame:
+def build_skill_table(
+    metrics_df: pd.DataFrame,
+    baseline_model: str = "persistence",
+) -> pd.DataFrame:
     required = {"dataset", "horizon", "model", "rmse"}
     missing = required - set(metrics_df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
 
     baseline_df = (
-        metrics_df.loc[metrics_df["model"] == "persistence", ["dataset", "horizon", "rmse"]]
-        .rename(columns={"rmse": "rmse_persistence"})
+        metrics_df.loc[metrics_df["model"] == baseline_model, ["dataset", "horizon", "rmse"]]
+        .rename(columns={"rmse": "rmse_baseline"})
         .copy()
     )
 
-    if (baseline_df["rmse_persistence"] <= 0).any():
-        raise ValueError("Persistence RMSE must be strictly positive to compute skill.")
+    if (baseline_df["rmse_baseline"] <= 0).any():
+        raise ValueError("Baseline RMSE must be strictly positive to compute skill.")
 
     skill_df = metrics_df.merge(
         baseline_df,
@@ -66,13 +69,14 @@ def build_skill_table(metrics_df: pd.DataFrame) -> pd.DataFrame:
         validate="many_to_one",
     )
 
-    if skill_df["rmse_persistence"].isna().any():
-        raise ValueError("Missing persistence RMSE for at least one dataset/horizon pair.")
+    if skill_df["rmse_baseline"].isna().any():
+        raise ValueError("Missing baseline RMSE for at least one dataset/horizon pair.")
 
-    skill_df["skill_vs_persistence"] = 1.0 - (
-        skill_df["rmse"] / skill_df["rmse_persistence"]
+    skill_df["baseline_model"] = baseline_model
+    skill_df["skill_vs_baseline"] = 1.0 - (
+        skill_df["rmse"] / skill_df["rmse_baseline"]
     )
-    skill_df.loc[skill_df["model"] == "persistence", "skill_vs_persistence"] = 0.0
+    skill_df.loc[skill_df["model"] == baseline_model, "skill_vs_baseline"] = 0.0
 
     return (
         skill_df[
@@ -81,8 +85,9 @@ def build_skill_table(metrics_df: pd.DataFrame) -> pd.DataFrame:
                 "horizon",
                 "model",
                 "rmse",
-                "rmse_persistence",
-                "skill_vs_persistence",
+                "baseline_model",
+                "rmse_baseline",
+                "skill_vs_baseline",
             ]
         ]
         .sort_values(["dataset", "horizon", "model"])
@@ -91,7 +96,7 @@ def build_skill_table(metrics_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_horizons_summary(skill_df: pd.DataFrame) -> pd.DataFrame:
-    required = {"dataset", "horizon", "model", "skill_vs_persistence"}
+    required = {"dataset", "horizon", "model", "skill_vs_baseline", "baseline_model"}
     missing = required - set(skill_df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
@@ -100,12 +105,14 @@ def build_horizons_summary(skill_df: pd.DataFrame) -> pd.DataFrame:
     for (dataset, model), group in skill_df.groupby(["dataset", "model"], sort=True):
         group = group.sort_values("horizon").reset_index(drop=True)
 
-        if model == "persistence":
+        baseline_model = str(group["baseline_model"].iloc[0])
+
+        if model == baseline_model:
             h = 0
             h_star_relax = 0
             h_star_strict = 0
         else:
-            skill_values = group["skill_vs_persistence"].to_list()
+            skill_values = group["skill_vs_baseline"].to_list()
             h = compute_hstar(skill_values, criterion="relax")
             h_star_relax = h
             h_star_strict = compute_hstar(skill_values, criterion="strict")
@@ -126,8 +133,10 @@ def build_horizons_summary(skill_df: pd.DataFrame) -> pd.DataFrame:
         .reset_index(drop=True)
     )
 
-
-def build_fold_skill_table(fold_metrics_df: pd.DataFrame) -> pd.DataFrame:
+def _build_fold_skill_table(
+    fold_metrics_df: pd.DataFrame,
+    baseline_model: str,
+) -> pd.DataFrame:
     required = {"dataset", "fold", "horizon", "model", "rmse"}
     missing = required - set(fold_metrics_df.columns)
     if missing:
@@ -135,15 +144,12 @@ def build_fold_skill_table(fold_metrics_df: pd.DataFrame) -> pd.DataFrame:
 
     baseline_df = (
         fold_metrics_df.loc[
-            fold_metrics_df["model"] == "persistence",
+            fold_metrics_df["model"] == baseline_model,
             ["dataset", "fold", "horizon", "rmse"],
         ]
-        .rename(columns={"rmse": "rmse_persistence"})
+        .rename(columns={"rmse": "rmse_baseline"})
         .copy()
     )
-
-    if (baseline_df["rmse_persistence"] <= 0).any():
-        raise ValueError("Persistence RMSE must be strictly positive to compute skill.")
 
     skill_df = fold_metrics_df.merge(
         baseline_df,
@@ -152,15 +158,23 @@ def build_fold_skill_table(fold_metrics_df: pd.DataFrame) -> pd.DataFrame:
         validate="many_to_one",
     )
 
-    if skill_df["rmse_persistence"].isna().any():
+    if skill_df["rmse_baseline"].isna().any():
         raise ValueError(
-            "Missing persistence RMSE for at least one dataset/fold/horizon combination."
+            "Missing baseline RMSE for at least one dataset/fold/horizon combination."
         )
 
-    skill_df["skill_vs_persistence"] = 1.0 - (
-        skill_df["rmse"] / skill_df["rmse_persistence"]
+    skill_df["baseline_model"] = baseline_model
+    skill_df["undefined_skill_flag"] = skill_df["rmse_baseline"] <= 0
+
+    skill_df["skill_vs_baseline"] = np.where(
+        skill_df["rmse_baseline"] > 0,
+        1.0 - (skill_df["rmse"] / skill_df["rmse_baseline"]),
+        np.nan,
     )
-    skill_df.loc[skill_df["model"] == "persistence", "skill_vs_persistence"] = 0.0
+    skill_df.loc[
+        (skill_df["model"] == baseline_model) & (~skill_df["undefined_skill_flag"]),
+        "skill_vs_baseline"
+    ] = 0.0
 
     return (
         skill_df[
@@ -170,8 +184,10 @@ def build_fold_skill_table(fold_metrics_df: pd.DataFrame) -> pd.DataFrame:
                 "horizon",
                 "model",
                 "rmse",
-                "rmse_persistence",
-                "skill_vs_persistence",
+                "baseline_model",
+                "rmse_baseline",
+                "skill_vs_baseline",
+                "undefined_skill_flag",
             ]
         ]
         .sort_values(["dataset", "horizon", "model", "fold"])
@@ -179,8 +195,15 @@ def build_fold_skill_table(fold_metrics_df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def build_fold_skill_table(
+    fold_metrics_df: pd.DataFrame,
+    baseline_model: str = "persistence",
+) -> pd.DataFrame:
+    return _build_fold_skill_table(fold_metrics_df, baseline_model=baseline_model)
+
+
 def build_fold_dispersion_summary(fold_skill_df: pd.DataFrame) -> pd.DataFrame:
-    required = {"dataset", "fold", "horizon", "model", "skill_vs_persistence"}
+    required = {"dataset", "fold", "horizon", "model", "skill_vs_baseline"}
     missing = required - set(fold_skill_df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
@@ -189,21 +212,24 @@ def build_fold_dispersion_summary(fold_skill_df: pd.DataFrame) -> pd.DataFrame:
     for (dataset, model, horizon), group in fold_skill_df.groupby(
         ["dataset", "model", "horizon"], sort=True
     ):
-        s = group["skill_vs_persistence"].astype(float)
+        s = group["skill_vs_baseline"].dropna().astype(float)
+        n_undefined = int(group["skill_vs_baseline"].isna().sum())
         rows.append(
             {
                 "dataset": dataset,
                 "model": model,
                 "horizon": int(horizon),
-                "mean_skill": float(s.mean()),
+                "mean_skill": float(s.mean()) if not s.empty else float("nan"),
                 "std_skill": float(s.std(ddof=1)) if len(s) > 1 else float("nan"),
-                "min_skill": float(s.min()),
-                "q25_skill": float(s.quantile(0.25)),
-                "median_skill": float(s.median()),
-                "q75_skill": float(s.quantile(0.75)),
-                "max_skill": float(s.max()),
-                "n_folds": int(len(s)),
-                "share_positive_skill": float((s > 0).mean()),
+                "min_skill": float(s.min()) if not s.empty else float("nan"),
+                "q25_skill": float(s.quantile(0.25)) if not s.empty else float("nan"),
+                "median_skill": float(s.median()) if not s.empty else float("nan"),
+                "q75_skill": float(s.quantile(0.75)) if not s.empty else float("nan"),
+                "max_skill": float(s.max()) if not s.empty else float("nan"),
+                "n_folds": int(len(group)),
+                "n_valid_folds": int(len(s)),
+                "n_undefined_skill_folds": n_undefined,
+                "share_positive_skill": float((s > 0).mean()) if not s.empty else float("nan"),
             }
         )
 
@@ -215,7 +241,7 @@ def build_fold_dispersion_summary(fold_skill_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_trajectory_summary(skill_df: pd.DataFrame) -> pd.DataFrame:
-    required = {"dataset", "horizon", "model", "skill_vs_persistence"}
+    required = {"dataset", "horizon", "model", "skill_vs_baseline"}
     missing = required - set(skill_df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
@@ -223,7 +249,7 @@ def build_trajectory_summary(skill_df: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for (dataset, model), group in skill_df.groupby(["dataset", "model"], sort=True):
         group = group.sort_values("horizon").reset_index(drop=True)
-        skill = group["skill_vs_persistence"].astype(float)
+        skill = group["skill_vs_baseline"].astype(float)
         horizons = group["horizon"].astype(int)
 
         peak_idx = int(skill.idxmax())

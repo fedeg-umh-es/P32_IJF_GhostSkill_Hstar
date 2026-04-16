@@ -91,6 +91,15 @@ def load_dataset(config_path: str | Path) -> dict[str, Any]:
         sort=True,
     )
 
+    if df[value_cols].isna().any().any():
+        valid_mask = df[value_cols].notna().all(axis=1)
+        segment_ids = (~valid_mask).cumsum()[valid_mask]
+        if segment_ids.empty:
+            raise ValueError(f"No valid data rows found in {data_path} for target/features.")
+        longest_segment_id = segment_ids.value_counts().idxmax()
+        df = df.loc[segment_ids[segment_ids == longest_segment_id].index].copy()
+        df = df.reset_index(drop=True)
+
     feature_columns = list(dict.fromkeys([*endogenous, *exogenous]))
     X = df.loc[:, feature_columns].copy()
     y = df.loc[:, target_column].copy()

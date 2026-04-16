@@ -49,12 +49,12 @@ def build_variance_retention_table(
         ``y_true``, and ``y_pred`` columns.
     skill_df:
         Aggregate skill table from ``build_skill_table``, used to pull
-        ``skill_vs_persistence`` per (dataset, model, horizon).
+        ``skill_vs_baseline`` per (dataset, model, horizon).
     collapse_threshold, inflation_threshold, tolerance:
         Passed to ``variance_diagnostic_flags``.
     """
     required_fold = {"dataset", "model", "horizon", "y_true", "y_pred"}
-    required_skill = {"dataset", "model", "horizon", "skill_vs_persistence"}
+    required_skill = {"dataset", "model", "horizon", "skill_vs_baseline"}
     for required, label in [
         (required_fold, "fold_metrics_df"),
         (required_skill, "skill_df"),
@@ -66,7 +66,7 @@ def build_variance_retention_table(
             raise ValueError(f"Missing required columns in {label}: {sorted(missing)}")
 
     skill_lookup = skill_df.set_index(["dataset", "model", "horizon"])[
-        "skill_vs_persistence"
+        "skill_vs_baseline"
     ].to_dict()
 
     rows = []

@@ -1,0 +1,23 @@
+name: madrid_pm10_rank
+target_column: pm10
+datetime_column: date
+frequency: daily
+horizons: [1, 2, 3, 4, 5, 6, 7]
+
+features:
+  endogenous:
+    - pm10
+  exogenous: []
+
+split:
+  scheme: rolling_origin
+  min_train_size: 365
+  step_size: 1
+  test_size: 7
+
+preprocessing:
+  scale: false
+  impute: false
+
+paths:
+  raw: ../madrid-pm10-rank-reversal/data_processed/modeling/pm10_daily_dataset.csv

@@ -24,7 +24,7 @@ from src.diagnostics.hstar import (
 )
 from src.diagnostics.variance import build_variance_retention_table
 from src.evaluation.rolling_origin import generate_rolling_origin_folds
-from src.models.baselines import persistence_forecast
+from src.models.baselines import persistence_forecast, seasonal_persistence_7_forecast
 from src.visualization.plots import plot_fold_skill_boxplot, plot_skill_by_horizon
 
 
@@ -89,6 +89,43 @@ def evaluate_persistence_folds(
                     "fold": fold_idx,
                     "horizon": horizon,
                     "model": "persistence",
+                    "rmse": abs(yt - yp),
+                    "y_true": yt,
+                    "y_pred": yp,
+                }
+            )
+
+    return rows
+
+
+def evaluate_seasonal_persistence_7_folds(
+    y: np.ndarray,
+    horizons: list[int],
+    min_train_size: int,
+    step_size: int,
+    dataset_name: str,
+) -> list[dict[str, float | int | str]]:
+    rows: list[dict[str, float | int | str]] = []
+    n_obs = len(y)
+
+    for horizon in horizons:
+        folds = generate_rolling_origin_folds(
+            n_obs=n_obs,
+            min_train_size=min_train_size,
+            horizon=horizon,
+            step=step_size,
+        )
+        for fold_idx, fold in enumerate(folds):
+            train_y = y[fold.train_start : fold.train_end + 1]
+            pred = seasonal_persistence_7_forecast(history=train_y, horizon=horizon)[-1]
+            yt = float(y[fold.test_end])
+            yp = float(pred)
+            rows.append(
+                {
+                    "dataset": dataset_name,
+                    "fold": fold_idx,
+                    "horizon": horizon,
+                    "model": "seasonal_persistence_7",
                     "rmse": abs(yt - yp),
                     "y_true": yt,
                     "y_pred": yp,
@@ -243,10 +280,32 @@ def run_benchmark(
     n_lags: int,
     ridge_alpha: float,
     arima_order: tuple[int, int, int] = (1, 1, 0),
+    skill_baseline: str = "persistence",
 ) -> pd.DataFrame:
     dataset = load_dataset(config_path)
-    if dataset["name"] != "pm10_example":
-        raise ValueError(f"This runner is currently wired only for pm10_example, got {dataset['name']}.")
+
+    def resolve_output_path(original_path: Path, dataset_name: str, baseline_name: str) -> Path:
+        suffix_parts: list[str] = []
+        if dataset_name != "pm10_example":
+            suffix_parts.append(dataset_name)
+        if baseline_name != "persistence":
+            suffix_parts.append(f"vs_{baseline_name}")
+        if not suffix_parts:
+            return original_path
+        return original_path.parent / f"{'_'.join(suffix_parts)}_{original_path.name}"
+
+    d_name = dataset["name"]
+    metrics_output = resolve_output_path(metrics_output, d_name, skill_baseline)
+    log_output = resolve_output_path(log_output, d_name, skill_baseline)
+    skill_output = resolve_output_path(skill_output, d_name, skill_baseline)
+    horizons_output = resolve_output_path(horizons_output, d_name, skill_baseline)
+    trajectory_output = resolve_output_path(trajectory_output, d_name, skill_baseline)
+    fold_skill_output = resolve_output_path(fold_skill_output, d_name, skill_baseline)
+    fold_dispersion_output = resolve_output_path(fold_dispersion_output, d_name, skill_baseline)
+    robust_horizons_output = resolve_output_path(robust_horizons_output, d_name, skill_baseline)
+    variance_retention_output = resolve_output_path(variance_retention_output, d_name, skill_baseline)
+    skill_plot_output = resolve_output_path(skill_plot_output, d_name, skill_baseline)
+    fold_skill_boxplot_output = resolve_output_path(fold_skill_boxplot_output, d_name, skill_baseline)
 
     split_cfg = dataset["metadata"]["split"]
     if split_cfg.get("scheme") != "rolling_origin":
@@ -266,6 +325,15 @@ def run_benchmark(
         min_train_size=min_train_size,
         step_size=step_size,
         dataset_name=dataset["name"],
+    )
+    fold_rows.extend(
+        evaluate_seasonal_persistence_7_folds(
+            y=y,
+            horizons=horizons,
+            min_train_size=min_train_size,
+            step_size=step_size,
+            dataset_name=dataset["name"],
+        )
     )
     fold_rows.extend(
         evaluate_ridge_folds(
@@ -302,7 +370,7 @@ def run_benchmark(
 
     metrics_output.parent.mkdir(parents=True, exist_ok=True)
     metrics_df.to_csv(metrics_output, index=False)
-    skill_df = build_skill_table(metrics_df)
+    skill_df = build_skill_table(metrics_df, baseline_model=skill_baseline)
     skill_output.parent.mkdir(parents=True, exist_ok=True)
     skill_df.to_csv(skill_output, index=False)
     horizons_df = build_horizons_summary(skill_df)
@@ -313,7 +381,7 @@ def run_benchmark(
     trajectory_df.to_csv(trajectory_output, index=False)
 
     fold_metrics_df = pd.DataFrame(fold_rows)
-    fold_skill_df = build_fold_skill_table(fold_metrics_df)
+    fold_skill_df = build_fold_skill_table(fold_metrics_df, baseline_model=skill_baseline)
     fold_skill_output.parent.mkdir(parents=True, exist_ok=True)
     fold_skill_df.to_csv(fold_skill_output, index=False)
     fold_dispersion_df = build_fold_dispersion_summary(fold_skill_df)
@@ -325,12 +393,18 @@ def run_benchmark(
     variance_df = build_variance_retention_table(fold_metrics_df, skill_df)
     variance_retention_output.parent.mkdir(parents=True, exist_ok=True)
     variance_df.to_csv(variance_retention_output, index=False)
-    plot_skill_by_horizon(skill_df, skill_plot_output, dataset_name=dataset["name"])
+    plot_skill_by_horizon(
+        skill_df,
+        skill_plot_output,
+        dataset_name=dataset["name"],
+        baseline_model=skill_baseline,
+    )
     plot_fold_skill_boxplot(
         fold_skill_df,
         fold_skill_boxplot_output,
         dataset_name=dataset["name"],
         exclude_baseline=True,
+        baseline_model=skill_baseline,
     )
 
 
@@ -346,7 +420,9 @@ def run_benchmark(
         f"min_train_size={min_train_size}",
         f"step_size={step_size}",
         f"n_folds_by_horizon={n_folds_summary}",
-        f"models=persistence,ridge,{arima_model_name}",
+        "models=persistence,seasonal_persistence_7,ridge,"
+        f"{arima_model_name}",
+        f"skill_baseline={skill_baseline}",
         f"ridge_alpha={ridge_alpha}",
         f"n_lags={n_lags}",
         f"arima_order={arima_order}",
@@ -386,6 +462,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--arima-p", type=int, default=1)
     parser.add_argument("--arima-d", type=int, default=1)
     parser.add_argument("--arima-q", type=int, default=0)
+    parser.add_argument(
+        "--skill-baseline",
+        type=str,
+        default="persistence",
+        choices=["persistence", "seasonal_persistence_7"],
+    )
     return parser.parse_args()
 
 
@@ -407,6 +489,7 @@ def main() -> None:
         n_lags=args.n_lags,
         ridge_alpha=args.ridge_alpha,
         arima_order=(args.arima_p, args.arima_d, args.arima_q),
+        skill_baseline=args.skill_baseline,
     )
     print(metrics_df.to_string(index=False))
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from src.diagnostics.hstar import compute_hstar
 from src.diagnostics.hstar import build_horizons_summary, build_skill_table, build_trajectory_summary
@@ -25,35 +26,46 @@ def test_build_skill_table() -> None:
     metrics_df = pd.DataFrame(
         [
             {"dataset": "pm10_example", "horizon": 1, "model": "persistence", "rmse": 2.0},
+            {"dataset": "pm10_example", "horizon": 1, "model": "seasonal_persistence_7", "rmse": 1.5},
             {"dataset": "pm10_example", "horizon": 1, "model": "ridge", "rmse": 1.0},
             {"dataset": "pm10_example", "horizon": 2, "model": "persistence", "rmse": 4.0},
+            {"dataset": "pm10_example", "horizon": 2, "model": "seasonal_persistence_7", "rmse": 3.0},
             {"dataset": "pm10_example", "horizon": 2, "model": "ridge", "rmse": 5.0},
         ]
     )
 
-    skill_df = build_skill_table(metrics_df)
+    skill_df = build_skill_table(metrics_df, baseline_model="seasonal_persistence_7")
 
     assert list(skill_df.columns) == [
         "dataset",
         "horizon",
         "model",
         "rmse",
-        "rmse_persistence",
-        "skill_vs_persistence",
+        "baseline_model",
+        "rmse_baseline",
+        "skill_vs_baseline",
     ]
-    assert skill_df.loc[skill_df["model"] == "persistence", "skill_vs_persistence"].tolist() == [0.0, 0.0]
-    assert skill_df.loc[skill_df["model"] == "ridge", "skill_vs_persistence"].tolist() == [0.5, -0.25]
+    assert skill_df.loc[:, "baseline_model"].unique().tolist() == ["seasonal_persistence_7"]
+    assert skill_df.loc[
+        skill_df["model"] == "seasonal_persistence_7", "skill_vs_baseline"
+    ].tolist() == [0.0, 0.0]
+    assert skill_df.loc[
+        skill_df["model"] == "persistence", "skill_vs_baseline"
+    ].tolist() == pytest.approx([-1 / 3, -1 / 3])
+    assert skill_df.loc[
+        skill_df["model"] == "ridge", "skill_vs_baseline"
+    ].tolist() == pytest.approx([1 / 3, -2 / 3])
 
 
 def test_build_horizons_summary() -> None:
     skill_df = pd.DataFrame(
         [
-            {"dataset": "pm10_example", "horizon": 1, "model": "persistence", "skill_vs_persistence": 0.0},
-            {"dataset": "pm10_example", "horizon": 2, "model": "persistence", "skill_vs_persistence": 0.0},
-            {"dataset": "pm10_example", "horizon": 1, "model": "ridge", "skill_vs_persistence": 0.3},
-            {"dataset": "pm10_example", "horizon": 2, "model": "ridge", "skill_vs_persistence": 0.2},
-            {"dataset": "pm10_example", "horizon": 3, "model": "ridge", "skill_vs_persistence": -0.1},
-            {"dataset": "pm10_example", "horizon": 4, "model": "ridge", "skill_vs_persistence": 0.1},
+            {"dataset": "pm10_example", "horizon": 1, "model": "persistence", "baseline_model": "persistence", "skill_vs_baseline": 0.0},
+            {"dataset": "pm10_example", "horizon": 2, "model": "persistence", "baseline_model": "persistence", "skill_vs_baseline": 0.0},
+            {"dataset": "pm10_example", "horizon": 1, "model": "ridge", "baseline_model": "persistence", "skill_vs_baseline": 0.3},
+            {"dataset": "pm10_example", "horizon": 2, "model": "ridge", "baseline_model": "persistence", "skill_vs_baseline": 0.2},
+            {"dataset": "pm10_example", "horizon": 3, "model": "ridge", "baseline_model": "persistence", "skill_vs_baseline": -0.1},
+            {"dataset": "pm10_example", "horizon": 4, "model": "ridge", "baseline_model": "persistence", "skill_vs_baseline": 0.1},
         ]
     )
 
@@ -69,11 +81,11 @@ def test_build_horizons_summary() -> None:
 def test_build_trajectory_summary() -> None:
     skill_df = pd.DataFrame(
         [
-            {"dataset": "pm10_example", "horizon": 1, "model": "persistence", "skill_vs_persistence": 0.0},
-            {"dataset": "pm10_example", "horizon": 2, "model": "persistence", "skill_vs_persistence": 0.0},
-            {"dataset": "pm10_example", "horizon": 1, "model": "ridge", "skill_vs_persistence": 0.2},
-            {"dataset": "pm10_example", "horizon": 2, "model": "ridge", "skill_vs_persistence": 0.5},
-            {"dataset": "pm10_example", "horizon": 3, "model": "ridge", "skill_vs_persistence": 0.1},
+            {"dataset": "pm10_example", "horizon": 1, "model": "persistence", "baseline_model": "persistence", "skill_vs_baseline": 0.0},
+            {"dataset": "pm10_example", "horizon": 2, "model": "persistence", "baseline_model": "persistence", "skill_vs_baseline": 0.0},
+            {"dataset": "pm10_example", "horizon": 1, "model": "ridge", "baseline_model": "persistence", "skill_vs_baseline": 0.2},
+            {"dataset": "pm10_example", "horizon": 2, "model": "ridge", "baseline_model": "persistence", "skill_vs_baseline": 0.5},
+            {"dataset": "pm10_example", "horizon": 3, "model": "ridge", "baseline_model": "persistence", "skill_vs_baseline": 0.1},
         ]
     )
 
@@ -125,8 +137,8 @@ def test_build_variance_retention_table() -> None:
     )
     skill_df = pd.DataFrame(
         [
-            {"dataset": "pm10_example", "model": "ridge", "horizon": 1, "skill_vs_persistence": 0.5},
-            {"dataset": "pm10_example", "model": "persistence", "horizon": 1, "skill_vs_persistence": 0.0},
+            {"dataset": "pm10_example", "model": "persistence", "horizon": 1, "skill_vs_baseline": 0.0},
+            {"dataset": "pm10_example", "model": "ridge", "horizon": 1, "skill_vs_baseline": 0.5},
         ]
     )
 
