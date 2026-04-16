@@ -6,7 +6,11 @@ from src.diagnostics.hstar import compute_hstar
 from src.diagnostics.hstar import build_horizons_summary, build_skill_table, build_trajectory_summary
 from src.diagnostics.lrs import LeakageRiskComponents, leakage_risk_label, leakage_risk_score
 from src.diagnostics.skill_vp import summarize_skill_vp
-from src.diagnostics.variance import detect_variance_collapse, variance_diagnostic_flags
+from src.diagnostics.variance import (
+    build_variance_retention_table,
+    detect_variance_collapse,
+    variance_diagnostic_flags,
+)
 
 
 def test_compute_hstar_strict() -> None:
@@ -108,6 +112,42 @@ def test_variance_flags_detect_collapse() -> None:
     assert detect_variance_collapse(0.4) is True
     assert flags.collapse_flag is True
     assert flags.inflation_flag is False
+
+
+def test_build_variance_retention_table() -> None:
+    fold_metrics_df = pd.DataFrame(
+        [
+            {"dataset": "pm10_example", "model": "ridge", "horizon": 1, "y_true": 0.0, "y_pred": 0.0},
+            {"dataset": "pm10_example", "model": "ridge", "horizon": 1, "y_true": 2.0, "y_pred": 1.0},
+            {"dataset": "pm10_example", "model": "persistence", "horizon": 1, "y_true": 0.0, "y_pred": 0.0},
+            {"dataset": "pm10_example", "model": "persistence", "horizon": 1, "y_true": 2.0, "y_pred": 2.0},
+        ]
+    )
+    skill_df = pd.DataFrame(
+        [
+            {"dataset": "pm10_example", "model": "ridge", "horizon": 1, "skill_vs_persistence": 0.5},
+            {"dataset": "pm10_example", "model": "persistence", "horizon": 1, "skill_vs_persistence": 0.0},
+        ]
+    )
+
+    variance_df = build_variance_retention_table(fold_metrics_df, skill_df)
+
+    assert list(variance_df.columns) == [
+        "dataset",
+        "model",
+        "horizon",
+        "skill",
+        "alpha",
+        "skill_vp",
+        "collapse_flag",
+        "inflation_flag",
+        "near_ideal_flag",
+    ]
+    ridge_row = variance_df.loc[variance_df["model"] == "ridge"].iloc[0]
+    assert ridge_row["skill"] == 0.5
+    assert ridge_row["alpha"] == 0.25
+    assert ridge_row["skill_vp"] == 0.125
+    assert bool(ridge_row["collapse_flag"]) is True
 
 
 def test_lrs_score_and_label() -> None:

@@ -127,6 +127,93 @@ def build_horizons_summary(skill_df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def build_fold_skill_table(fold_metrics_df: pd.DataFrame) -> pd.DataFrame:
+    required = {"dataset", "fold", "horizon", "model", "rmse"}
+    missing = required - set(fold_metrics_df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {sorted(missing)}")
+
+    baseline_df = (
+        fold_metrics_df.loc[
+            fold_metrics_df["model"] == "persistence",
+            ["dataset", "fold", "horizon", "rmse"],
+        ]
+        .rename(columns={"rmse": "rmse_persistence"})
+        .copy()
+    )
+
+    if (baseline_df["rmse_persistence"] <= 0).any():
+        raise ValueError("Persistence RMSE must be strictly positive to compute skill.")
+
+    skill_df = fold_metrics_df.merge(
+        baseline_df,
+        on=["dataset", "fold", "horizon"],
+        how="left",
+        validate="many_to_one",
+    )
+
+    if skill_df["rmse_persistence"].isna().any():
+        raise ValueError(
+            "Missing persistence RMSE for at least one dataset/fold/horizon combination."
+        )
+
+    skill_df["skill_vs_persistence"] = 1.0 - (
+        skill_df["rmse"] / skill_df["rmse_persistence"]
+    )
+    skill_df.loc[skill_df["model"] == "persistence", "skill_vs_persistence"] = 0.0
+
+    return (
+        skill_df[
+            [
+                "dataset",
+                "fold",
+                "horizon",
+                "model",
+                "rmse",
+                "rmse_persistence",
+                "skill_vs_persistence",
+            ]
+        ]
+        .sort_values(["dataset", "horizon", "model", "fold"])
+        .reset_index(drop=True)
+    )
+
+
+def build_fold_dispersion_summary(fold_skill_df: pd.DataFrame) -> pd.DataFrame:
+    required = {"dataset", "fold", "horizon", "model", "skill_vs_persistence"}
+    missing = required - set(fold_skill_df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {sorted(missing)}")
+
+    rows = []
+    for (dataset, model, horizon), group in fold_skill_df.groupby(
+        ["dataset", "model", "horizon"], sort=True
+    ):
+        s = group["skill_vs_persistence"].astype(float)
+        rows.append(
+            {
+                "dataset": dataset,
+                "model": model,
+                "horizon": int(horizon),
+                "mean_skill": float(s.mean()),
+                "std_skill": float(s.std(ddof=1)) if len(s) > 1 else float("nan"),
+                "min_skill": float(s.min()),
+                "q25_skill": float(s.quantile(0.25)),
+                "median_skill": float(s.median()),
+                "q75_skill": float(s.quantile(0.75)),
+                "max_skill": float(s.max()),
+                "n_folds": int(len(s)),
+                "share_positive_skill": float((s > 0).mean()),
+            }
+        )
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values(["dataset", "model", "horizon"])
+        .reset_index(drop=True)
+    )
+
+
 def build_trajectory_summary(skill_df: pd.DataFrame) -> pd.DataFrame:
     required = {"dataset", "horizon", "model", "skill_vs_persistence"}
     missing = required - set(skill_df.columns)
@@ -151,6 +238,53 @@ def build_trajectory_summary(skill_df: pd.DataFrame) -> pd.DataFrame:
                 "argmax_skill": int(group.loc[peak_idx, "horizon"]),
                 "skill_range": float(max_skill - float(skill.min())),
                 "skill_drop_last_vs_peak": float(max_skill - last_skill),
+            }
+        )
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values(["dataset", "model"])
+        .reset_index(drop=True)
+    )
+
+
+def _last_h_where(horizons: list[int], mask: list[bool]) -> int:
+    """Return the last horizon (relax semantics) where mask is True, or 0."""
+    candidates = [h for h, m in zip(horizons, mask) if m]
+    return candidates[-1] if candidates else 0
+
+
+def build_robust_horizons_summary(fold_dispersion_df: pd.DataFrame) -> pd.DataFrame:
+    required = {
+        "dataset",
+        "model",
+        "horizon",
+        "median_skill",
+        "share_positive_skill",
+        "q25_skill",
+    }
+    missing = required - set(fold_dispersion_df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {sorted(missing)}")
+
+    rows = []
+    for (dataset, model), group in fold_dispersion_df.groupby(
+        ["dataset", "model"], sort=True
+    ):
+        group = group.sort_values("horizon").reset_index(drop=True)
+        horizons = group["horizon"].tolist()
+        median = group["median_skill"].tolist()
+        share = group["share_positive_skill"].tolist()
+        q25 = group["q25_skill"].tolist()
+
+        rows.append(
+            {
+                "dataset": dataset,
+                "model": model,
+                "last_h_positive_median": _last_h_where(horizons, [v > 0 for v in median]),
+                "last_h_share_ge_0_50": _last_h_where(horizons, [v >= 0.50 for v in share]),
+                "last_h_share_ge_0_75": _last_h_where(horizons, [v >= 0.75 for v in share]),
+                "last_h_q25_nonneg": _last_h_where(horizons, [v >= 0.0 for v in q25]),
             }
         )
 

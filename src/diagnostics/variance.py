@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+import pandas as pd
 
+from src.evaluation.metrics import skill_vp as _skill_vp
 from src.evaluation.metrics import variance_ratio_alpha
 
 
@@ -29,6 +31,82 @@ class VarianceFlagSummary:
     collapse_flag: bool
     inflation_flag: bool
     near_ideal_flag: bool
+
+
+def build_variance_retention_table(
+    fold_metrics_df: pd.DataFrame,
+    skill_df: pd.DataFrame,
+    collapse_threshold: float = 0.5,
+    inflation_threshold: float = 1.5,
+    tolerance: float = 0.15,
+) -> pd.DataFrame:
+    """Compute per-(dataset, model, horizon) variance retention and Skill_VP.
+
+    Parameters
+    ----------
+    fold_metrics_df:
+        Per-fold rows with at least ``dataset``, ``model``, ``horizon``,
+        ``y_true``, and ``y_pred`` columns.
+    skill_df:
+        Aggregate skill table from ``build_skill_table``, used to pull
+        ``skill_vs_persistence`` per (dataset, model, horizon).
+    collapse_threshold, inflation_threshold, tolerance:
+        Passed to ``variance_diagnostic_flags``.
+    """
+    required_fold = {"dataset", "model", "horizon", "y_true", "y_pred"}
+    required_skill = {"dataset", "model", "horizon", "skill_vs_persistence"}
+    for required, label in [
+        (required_fold, "fold_metrics_df"),
+        (required_skill, "skill_df"),
+    ]:
+        missing = required - set(
+            fold_metrics_df.columns if label == "fold_metrics_df" else skill_df.columns
+        )
+        if missing:
+            raise ValueError(f"Missing required columns in {label}: {sorted(missing)}")
+
+    skill_lookup = skill_df.set_index(["dataset", "model", "horizon"])[
+        "skill_vs_persistence"
+    ].to_dict()
+
+    rows = []
+    for (dataset, model, horizon), group in fold_metrics_df.groupby(
+        ["dataset", "model", "horizon"], sort=True
+    ):
+        y_true = group["y_true"].to_numpy(dtype=float)
+        y_pred = group["y_pred"].to_numpy(dtype=float)
+
+        alpha = variance_retention(y_true, y_pred)
+        flags = variance_diagnostic_flags(
+            alpha,
+            collapse_threshold=collapse_threshold,
+            inflation_threshold=inflation_threshold,
+            tolerance=tolerance,
+        )
+        skill_val = float(
+            skill_lookup.get((dataset, model, int(horizon)), float("nan"))
+        )
+        svp = float(_skill_vp(skill_val, alpha)) if not np.isnan(skill_val) else float("nan")
+
+        rows.append(
+            {
+                "dataset": dataset,
+                "model": model,
+                "horizon": int(horizon),
+                "skill": skill_val,
+                "alpha": alpha,
+                "skill_vp": svp,
+                "collapse_flag": flags.collapse_flag,
+                "inflation_flag": flags.inflation_flag,
+                "near_ideal_flag": flags.near_ideal_flag,
+            }
+        )
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values(["dataset", "model", "horizon"])
+        .reset_index(drop=True)
+    )
 
 
 def variance_diagnostic_flags(
