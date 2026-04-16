@@ -13,6 +13,7 @@ import pandas as pd
 from sklearn.linear_model import Ridge
 
 from src.data.loaders import load_dataset
+from src.diagnostics.hstar import build_horizons_summary, build_skill_table
 from src.evaluation.metrics import rmse
 from src.evaluation.rolling_origin import generate_rolling_origin_folds
 from src.models.baselines import persistence_forecast
@@ -21,6 +22,8 @@ from src.models.baselines import persistence_forecast
 DEFAULT_CONFIG = Path("configs/datasets/pm10_example.yaml")
 DEFAULT_METRICS_OUTPUT = Path("outputs/tables/metrics_by_horizon.csv")
 DEFAULT_LOG_OUTPUT = Path("outputs/logs/run_summary.txt")
+DEFAULT_SKILL_OUTPUT = Path("outputs/tables/skill_by_horizon.csv")
+DEFAULT_HORIZONS_OUTPUT = Path("outputs/tables/horizons_summary.csv")
 
 
 def build_direct_lagged_samples(y: np.ndarray, horizon: int, n_lags: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -135,6 +138,8 @@ def run_benchmark(
     config_path: Path,
     metrics_output: Path,
     log_output: Path,
+    skill_output: Path,
+    horizons_output: Path,
     n_lags: int,
     ridge_alpha: float,
 ) -> pd.DataFrame:
@@ -185,6 +190,12 @@ def run_benchmark(
 
     metrics_output.parent.mkdir(parents=True, exist_ok=True)
     metrics_df.to_csv(metrics_output, index=False)
+    skill_df = build_skill_table(metrics_df)
+    skill_output.parent.mkdir(parents=True, exist_ok=True)
+    skill_df.to_csv(skill_output, index=False)
+    horizons_df = build_horizons_summary(skill_df)
+    horizons_output.parent.mkdir(parents=True, exist_ok=True)
+    horizons_df.to_csv(horizons_output, index=False)
 
     log_output.parent.mkdir(parents=True, exist_ok=True)
     summary_lines = [
@@ -202,6 +213,8 @@ def run_benchmark(
         f"ridge_alpha={ridge_alpha}",
         f"n_lags={n_lags}",
         f"metrics_output={metrics_output.resolve()}",
+        f"skill_table_path={skill_output.resolve()}",
+        f"horizons_summary_path={horizons_output.resolve()}",
         f"log_output={log_output.resolve()}",
     ]
     log_output.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
@@ -214,6 +227,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--metrics-output", type=Path, default=DEFAULT_METRICS_OUTPUT)
     parser.add_argument("--log-output", type=Path, default=DEFAULT_LOG_OUTPUT)
+    parser.add_argument("--skill-output", type=Path, default=DEFAULT_SKILL_OUTPUT)
+    parser.add_argument("--horizons-output", type=Path, default=DEFAULT_HORIZONS_OUTPUT)
     parser.add_argument("--n-lags", type=int, default=7)
     parser.add_argument("--ridge-alpha", type=float, default=1.0)
     return parser.parse_args()
@@ -225,6 +240,8 @@ def main() -> None:
         config_path=args.config,
         metrics_output=args.metrics_output,
         log_output=args.log_output,
+        skill_output=args.skill_output,
+        horizons_output=args.horizons_output,
         n_lags=args.n_lags,
         ridge_alpha=args.ridge_alpha,
     )
