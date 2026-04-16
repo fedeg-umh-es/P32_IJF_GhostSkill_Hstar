@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from src.diagnostics.hstar import compute_hstar
-from src.diagnostics.hstar import build_horizons_summary, build_skill_table
+from src.diagnostics.hstar import build_horizons_summary, build_skill_table, build_trajectory_summary
 from src.diagnostics.lrs import LeakageRiskComponents, leakage_risk_label, leakage_risk_score
 from src.diagnostics.skill_vp import summarize_skill_vp
 from src.diagnostics.variance import detect_variance_collapse, variance_diagnostic_flags
@@ -60,6 +60,41 @@ def test_build_horizons_summary() -> None:
 
     assert (persistence_row["H"], persistence_row["H_star_relax"], persistence_row["H_star_strict"]) == (0, 0, 0)
     assert (ridge_row["H"], ridge_row["H_star_relax"], ridge_row["H_star_strict"]) == (4, 4, 2)
+
+
+def test_build_trajectory_summary() -> None:
+    skill_df = pd.DataFrame(
+        [
+            {"dataset": "pm10_example", "horizon": 1, "model": "persistence", "skill_vs_persistence": 0.0},
+            {"dataset": "pm10_example", "horizon": 2, "model": "persistence", "skill_vs_persistence": 0.0},
+            {"dataset": "pm10_example", "horizon": 1, "model": "ridge", "skill_vs_persistence": 0.2},
+            {"dataset": "pm10_example", "horizon": 2, "model": "ridge", "skill_vs_persistence": 0.5},
+            {"dataset": "pm10_example", "horizon": 3, "model": "ridge", "skill_vs_persistence": 0.1},
+        ]
+    )
+
+    summary_df = build_trajectory_summary(skill_df)
+    persistence_row = summary_df.loc[summary_df["model"] == "persistence"].iloc[0]
+    ridge_row = summary_df.loc[summary_df["model"] == "ridge"].iloc[0]
+
+    assert list(summary_df.columns) == [
+        "dataset",
+        "model",
+        "max_skill",
+        "argmax_skill",
+        "skill_range",
+        "skill_drop_last_vs_peak",
+    ]
+    assert (
+        persistence_row["max_skill"],
+        persistence_row["argmax_skill"],
+        persistence_row["skill_range"],
+        persistence_row["skill_drop_last_vs_peak"],
+    ) == (0.0, 1, 0.0, 0.0)
+    assert ridge_row["max_skill"] == 0.5
+    assert ridge_row["argmax_skill"] == 2
+    assert ridge_row["skill_range"] == 0.4
+    assert ridge_row["skill_drop_last_vs_peak"] == 0.4
 
 
 def test_summarize_skill_vp_labels_collapse() -> None:

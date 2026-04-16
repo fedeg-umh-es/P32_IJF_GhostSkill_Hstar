@@ -13,10 +13,11 @@ import pandas as pd
 from sklearn.linear_model import Ridge
 
 from src.data.loaders import load_dataset
-from src.diagnostics.hstar import build_horizons_summary, build_skill_table
+from src.diagnostics.hstar import build_horizons_summary, build_skill_table, build_trajectory_summary
 from src.evaluation.metrics import rmse
 from src.evaluation.rolling_origin import generate_rolling_origin_folds
 from src.models.baselines import persistence_forecast
+from src.visualization.plots import plot_skill_by_horizon
 
 
 DEFAULT_CONFIG = Path("configs/datasets/pm10_example.yaml")
@@ -24,6 +25,8 @@ DEFAULT_METRICS_OUTPUT = Path("outputs/tables/metrics_by_horizon.csv")
 DEFAULT_LOG_OUTPUT = Path("outputs/logs/run_summary.txt")
 DEFAULT_SKILL_OUTPUT = Path("outputs/tables/skill_by_horizon.csv")
 DEFAULT_HORIZONS_OUTPUT = Path("outputs/tables/horizons_summary.csv")
+DEFAULT_TRAJECTORY_OUTPUT = Path("outputs/tables/trajectory_summary.csv")
+DEFAULT_SKILL_PLOT_OUTPUT = Path("outputs/figures/skill_by_horizon.png")
 
 
 def build_direct_lagged_samples(y: np.ndarray, horizon: int, n_lags: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -140,6 +143,8 @@ def run_benchmark(
     log_output: Path,
     skill_output: Path,
     horizons_output: Path,
+    trajectory_output: Path,
+    skill_plot_output: Path,
     n_lags: int,
     ridge_alpha: float,
 ) -> pd.DataFrame:
@@ -196,6 +201,10 @@ def run_benchmark(
     horizons_df = build_horizons_summary(skill_df)
     horizons_output.parent.mkdir(parents=True, exist_ok=True)
     horizons_df.to_csv(horizons_output, index=False)
+    trajectory_df = build_trajectory_summary(skill_df)
+    trajectory_output.parent.mkdir(parents=True, exist_ok=True)
+    trajectory_df.to_csv(trajectory_output, index=False)
+    plot_skill_by_horizon(skill_df, skill_plot_output, dataset_name=dataset["name"])
 
     log_output.parent.mkdir(parents=True, exist_ok=True)
     summary_lines = [
@@ -215,6 +224,8 @@ def run_benchmark(
         f"metrics_output={metrics_output.resolve()}",
         f"skill_table_path={skill_output.resolve()}",
         f"horizons_summary_path={horizons_output.resolve()}",
+        f"trajectory_summary_path={trajectory_output.resolve()}",
+        f"skill_plot_path={skill_plot_output.resolve()}",
         f"log_output={log_output.resolve()}",
     ]
     log_output.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
@@ -229,6 +240,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-output", type=Path, default=DEFAULT_LOG_OUTPUT)
     parser.add_argument("--skill-output", type=Path, default=DEFAULT_SKILL_OUTPUT)
     parser.add_argument("--horizons-output", type=Path, default=DEFAULT_HORIZONS_OUTPUT)
+    parser.add_argument("--trajectory-output", type=Path, default=DEFAULT_TRAJECTORY_OUTPUT)
+    parser.add_argument("--skill-plot-output", type=Path, default=DEFAULT_SKILL_PLOT_OUTPUT)
     parser.add_argument("--n-lags", type=int, default=7)
     parser.add_argument("--ridge-alpha", type=float, default=1.0)
     return parser.parse_args()
@@ -242,6 +255,8 @@ def main() -> None:
         log_output=args.log_output,
         skill_output=args.skill_output,
         horizons_output=args.horizons_output,
+        trajectory_output=args.trajectory_output,
+        skill_plot_output=args.skill_plot_output,
         n_lags=args.n_lags,
         ridge_alpha=args.ridge_alpha,
     )

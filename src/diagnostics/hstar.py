@@ -125,3 +125,37 @@ def build_horizons_summary(skill_df: pd.DataFrame) -> pd.DataFrame:
         .sort_values(["dataset", "model"])
         .reset_index(drop=True)
     )
+
+
+def build_trajectory_summary(skill_df: pd.DataFrame) -> pd.DataFrame:
+    required = {"dataset", "horizon", "model", "skill_vs_persistence"}
+    missing = required - set(skill_df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {sorted(missing)}")
+
+    rows = []
+    for (dataset, model), group in skill_df.groupby(["dataset", "model"], sort=True):
+        group = group.sort_values("horizon").reset_index(drop=True)
+        skill = group["skill_vs_persistence"].astype(float)
+        horizons = group["horizon"].astype(int)
+
+        peak_idx = int(skill.idxmax())
+        last_skill = float(skill.iloc[-1])
+        max_skill = float(skill.max())
+
+        rows.append(
+            {
+                "dataset": dataset,
+                "model": model,
+                "max_skill": max_skill,
+                "argmax_skill": int(group.loc[peak_idx, "horizon"]),
+                "skill_range": float(max_skill - float(skill.min())),
+                "skill_drop_last_vs_peak": float(max_skill - last_skill),
+            }
+        )
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values(["dataset", "model"])
+        .reset_index(drop=True)
+    )
